@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 
-class TimeSeriesClassificationDataset(Dataset):
+class TimeSeries(Dataset):
     def __init__(self, data, labels, window_size=30):
         self.data = data
         self.labels = labels
@@ -59,7 +59,7 @@ def train_model():
     prices, labels = load_data()
 
     window_size = 30
-    dataset = TimeSeriesClassificationDataset(prices, labels, window_size=window_size)
+    dataset = TimeSeries(prices, labels, window_size=window_size)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
     model = CNN1DModel(window_size=window_size)
@@ -88,7 +88,7 @@ def train_model():
 def evaluate_model():
     prices, labels = load_data()
     window_size = 30
-    dataset = TimeSeriesClassificationDataset(prices, labels, window_size=window_size)
+    dataset = TimeSeries(prices, labels, window_size=window_size)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
 
     model = CNN1DModel(window_size=window_size)
@@ -105,6 +105,7 @@ def evaluate_model():
     with torch.no_grad():
         for x, y in dataloader:
             out = model(x)
+            print("##### Input", x, "out", out)
             preds = torch.argmax(out, dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(y.cpu().numpy())

@@ -14,8 +14,10 @@ def show_data(df):
     print("Last few rows of the processed dataset:")
     print(df.tail(10))
 
+    obs = 9000
+
     plt.figure(figsize=(10, 4))
-    df['Close'].tail(9000).plot(title="Close Price (Normalized) - Last 200 Observations")
+    df['Close'].tail(obs).plot(title="close Price (Normalized) - Last " + str(obs) + " Observations")
     plt.xlabel("Date")
     plt.ylabel("Normalized Close Price")
     plt.tight_layout()
@@ -25,7 +27,7 @@ def show_data(df):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess Financial Time Series Data")
     parser.add_argument("--file", type=str, required=True, help="Raw CSV filename located in data/raw directory.")
-    parser.add_argument("--show", action="store_true", help="Show a glimpse of the final dataset and plot")
+    parser.add_argument("--show", action="store_true", help="plot dataset")
     args = parser.parse_args()
 
     raw_path = os.path.join("data", "raw")
