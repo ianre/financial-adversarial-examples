@@ -3,8 +3,9 @@ This repo aims to replicate the results in "Investigating machine learning attac
 
 ## Usage
 - Setup python environment using `requirements.txt`
-- Run `python src/fetchData.py` to fetch the data
-
+- Run `python src\fetchData.py` to fetch the data
+- Run `python .\src\prepareData.py --file <data file in data\raw> --show`
+- Run `python .src\model.py`
 
 
 
