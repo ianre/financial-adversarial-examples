@@ -3,6 +3,7 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
@@ -19,24 +20,26 @@ class TimeSeries(Dataset):
     def __getitem__(self, idx):
         x = self.data[idx:idx+self.window_size]
         y = self.labels[idx+self.window_size]
-        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.long)
+        return torch.tensor(x, dtype=torch.float32).unsqueeze(0), torch.tensor(y, dtype=torch.long)
 
 class CNN1DModel(nn.Module):
-    def __init__(self, input_channels=1, num_classes=2, kernel_size=3, hidden_dim=64, window_size=30):
+    def __init__(self):
         super(CNN1DModel, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=input_channels, out_channels=hidden_dim, kernel_size=kernel_size)
-        self.relu = nn.ReLU()
-        self.pool = nn.MaxPool1d(2)
-        conv_out_length = (window_size - (kernel_size - 1)) // 2
-        self.fc = nn.Linear(conv_out_length * hidden_dim, num_classes)
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, padding=1, stride=1)
+        self.conv2 = nn.Conv1d(in_channels=32, out_channels=3, kernel_size=3, padding=1, stride=1)
+        self.fc1 = nn.Linear(84, 250)
+        self.fc2 = nn.Linear(250, 2)
 
     def forward(self, x):
-        x = x.unsqueeze(1)
         x = self.conv1(x)
-        x = self.relu(x)
-        x = self.pool(x)
+        x = F.relu(x, inplace=True)
+        x = self.conv2(x)
+        x = F.relu(x, inplace=True)
         x = x.view(x.size(0), -1)
-        x = self.fc(x)
+        x = self.fc1(x)
+        x = F.relu(x, inplace=True)
+        x = self.fc2(x)
+        x = torch.sigmoid(x)
         return x
 
 def load_data():
@@ -58,22 +61,30 @@ def load_data():
 def train_model():
     prices, labels = load_data()
 
-    window_size = 30
+    window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
-    model = CNN1DModel(window_size=window_size)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    model = CNN1DModel()
+    optimizer = optim.SGD(model.parameters(), lr=1.71176e-5, momentum=0.081)
+    criterion = nn.BCELoss()
 
     epochs = 10
     for epoch in range(epochs):
         model.train()
-        total_loss = 0
+        total_loss = 0.0
         for x, y in dataloader:
+            y_one_hot = torch.zeros((y.size(0), 2))
+            for i, val in enumerate(y):
+                if val.item() == 1:
+                    y_one_hot[i,1] = 1.0
+                else:
+                    y_one_hot[i,0] = 1.0
+            y_one_hot = y_one_hot.float()
+
             optimizer.zero_grad()
             out = model(x)
-            loss = criterion(out, y)
+            loss = criterion(out, y_one_hot)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
@@ -87,11 +98,11 @@ def train_model():
 
 def evaluate_model():
     prices, labels = load_data()
-    window_size = 30
+    window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
 
-    model = CNN1DModel(window_size=window_size)
+    model = CNN1DModel()
     model_path = os.path.join("experiments", "results", "model.pth")
     if not os.path.exists(model_path):
         raise FileNotFoundError("No trained model found. Please train the model first.")
@@ -105,7 +116,6 @@ def evaluate_model():
     with torch.no_grad():
         for x, y in dataloader:
             out = model(x)
-            print("##### Input", x, "out", out)
             preds = torch.argmax(out, dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(y.cpu().numpy())
