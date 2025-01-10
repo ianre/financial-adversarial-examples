@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import accuracy_score
 
 class TimeSeries(Dataset):
     def __init__(self, data, labels, window_size=30):
@@ -42,34 +43,46 @@ class CNN1DModel(nn.Module):
         x = torch.sigmoid(x)
         return x
 
-def load_data():
-    attacked_path = os.path.join("data", "processed", "attacked_data.csv")
-    if os.path.exists(attacked_path):
-        df = pd.read_csv(attacked_path, index_col=0)
-        prices = df['Close'].values
-        labels = df['label'].values
-    else:
-        processed_path = os.path.join("data", "processed", "cleaned_data.csv")
-        df = pd.read_csv(processed_path, index_col=0)
-        prices = df['Close'].values
-        labels = (pd.Series(prices).shift(-1) > pd.Series(prices)).astype(int).values
-        prices = prices[:-1]
-        labels = labels[:-1]
+def load_data_train():
+    processed_path = os.path.join("data", "processed", "training_data.csv")
+    if not os.path.exists(processed_path):
+        raise FileNotFoundError("Please provide a valid CSV with 'Close' column.")
 
+    df = pd.read_csv(processed_path, index_col=0)
+    prices = df['Close'].values
+    labels = (pd.Series(prices).shift(-1) > pd.Series(prices)).astype(int).values
+    prices = prices[:-1]
+    labels = labels[:-1]
+    return prices, labels
+
+def load_data_evaluate():
+    processed_path = os.path.join("data", "processed", "evaluation_data.csv")
+    if not os.path.exists(processed_path):
+        raise FileNotFoundError("Please provide a valid CSV with 'Close' column.")
+
+    df = pd.read_csv(processed_path, index_col=0)
+    prices = df['Close'].values
+    labels = (pd.Series(prices).shift(-1) > pd.Series(prices)).astype(int).values
+    prices = prices[:-1]
+    labels = labels[:-1]
     return prices, labels
 
 def train_model():
-    prices, labels = load_data()
+    prices, labels = load_data_train()
+    eval_prices, eval_labels = load_data_evaluate()
 
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 
+    eval_dataset = TimeSeries(eval_prices, eval_labels, window_size=window_size)
+    eval_dataloader = DataLoader(eval_dataset, batch_size=32, shuffle=False)
+
     model = CNN1DModel()
     optimizer = optim.SGD(model.parameters(), lr=1.71176e-5, momentum=0.081)
     criterion = nn.BCELoss()
 
-    epochs = 10
+    epochs = 2000
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0
@@ -89,7 +102,34 @@ def train_model():
             optimizer.step()
             total_loss += loss.item()
         avg_loss = total_loss / len(dataloader)
+
         print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss}")
+        model.eval()
+        val_preds = []
+        val_truth = []
+        with torch.no_grad():
+            for x_eval, y_eval in eval_dataloader:
+                out_eval = model(x_eval)
+                preds = torch.argmax(out_eval, dim=1)  # 0 or 1
+                val_preds.extend(preds.cpu().numpy())
+                val_truth.extend(y_eval.cpu().numpy())
+
+        val_accuracy = accuracy_score(val_truth, val_preds)
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}, Eval Accuracy: {val_accuracy:.4f}")
+
+        model.eval()
+        val_preds = []
+        val_truth = []
+        with torch.no_grad():
+            for x_eval, y_eval in dataloader:
+                out_eval = model(x_eval)
+                preds = torch.argmax(out_eval, dim=1)  # 0 or 1
+                val_preds.extend(preds.cpu().numpy())
+                val_truth.extend(y_eval.cpu().numpy())
+
+        val_accuracy = accuracy_score(val_truth, val_preds)
+        print(f"Epoch {epoch+1}/{epochs},                    Accuracy: {val_accuracy:.4f}")
+
 
     model_path = os.path.join("experiments", "results", "model.pth")
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -97,7 +137,7 @@ def train_model():
     print("Model trained and saved at:", model_path)
 
 def evaluate_model():
-    prices, labels = load_data()
+    prices, labels = load_data_evaluate()
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
