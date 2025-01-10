@@ -1,2 +1,6 @@
 env
 data
+exp
+.vscode/launch.json
+src/__pycache__/model.cpython-310.pyc
+experiments/results/model.pth
