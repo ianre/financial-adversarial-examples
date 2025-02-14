@@ -71,7 +71,7 @@ def fgsm_attack(model, x, y, epsilon=4.54):
     # Forward pass
     output = model(x_adv)
 
-    # Calculate bce loss
+    # Calculate ce loss
     loss = loss_func(output, y)
 
     # Zero existing grads
