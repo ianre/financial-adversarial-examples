@@ -88,30 +88,31 @@ def fgsm_attack(model, x, y, epsilon=4.54):
 
     return x_adv.detach()
 
-def basic_iterative_method(model, x, y, epsilon=4.54, num_iterations=100):
+def basic_iterative_method(model, x, y, epsilon=4.54, num_iterations=50):
+
+    # per-iteration step size
+    step_size = epsilon / num_iterations
     x_adv = x.clone().detach()
 
-    for i in range(num_iterations): # iteratively apply fgsm
-
+    for i in range(num_iterations):
         x_adv.requires_grad_()
-
         output = model(x_adv)
-
         loss = loss_func(output, y)
 
         model.zero_grad()
-
         loss.backward()
 
-        x_adv = x_adv + epsilon * x_adv.grad.data.sign()
-
+        # Update adversarial series using step size
+        x_adv = x_adv + step_size * x_adv.grad.sign()
+        
         x_adv = x_adv.detach()
 
     return x_adv
 
 
+
 def generate_adversarial_data(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False)[:100]
+    prices, labels = load_data(attacked=False)
     
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
@@ -152,13 +153,13 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
     adv_df.to_csv(attacked_path)
     print(f"Adversarial data saved to {attacked_path}")
 
-def compare_predictions():
+def compare_predictions(attack_type):
     """
     Evaluate the model on both original and adversarial data,
     then compare and print the loss, accuracy, and prediction change rate.
     """
     original_labels, original_preds, original_loss = evaluate_model(attacked=False)
-    attacked_labels, attacked_preds, attacked_loss = evaluate_model(attacked=True)
+    attacked_labels, attacked_preds, attacked_loss = evaluate_model(attacked=True, type=attack_type)
 
     # Calculate prediction changes
     prediction_changes = sum(1 for x, y in zip(original_preds, attacked_preds) if x != y)
@@ -183,7 +184,7 @@ def plot_attacked_vs_original_data(attack_type='fgsm'):
     original_prices, _ = load_data(attacked=False)
     original_prices = original_prices[2194:2222]
     attacked_prices, _ = load_data(attacked=True, type=attack_type)
-    attacked_prices = attacked_prices[2194:2222]
+    #attacked_prices = attacked_prices[2194:2222]
     print(len(original_prices))
     print(len(attacked_prices))
     
@@ -223,7 +224,7 @@ def plot_epsilon_accuracy(attack_type='bim'):
     accuracies = []
     
     # Get original accuracy for reference
-    original_labels, original_preds, _ = evaluate_model(attacked=False)[:100]
+    original_labels, original_preds, _ = evaluate_model(attacked=False)
     original_accuracy = sum(1 for x, y in zip(original_labels, original_preds) if x == y) / len(original_labels)
     
     # Test each epsilon value
@@ -273,7 +274,7 @@ def main():
     elif args.mode == "attack":
         generate_adversarial_data(epsilon=4.54, type=args.type)
     elif args.mode == "compare":
-        compare_predictions()
+        compare_predictions(args.type)
     elif args.mode == "plot":
         if not args.type:
             print("Please specify attack type with --type [fgsm/bim]")
