@@ -1,6 +1,9 @@
 # financial-adversarial-examples
 This repo aims to replicate the results in "Investigating machine learning attacks on financial time series models"
 
+## Setup
+- In the base directory run `git clone https://github.com/time-series-foundation-models/lag-llama`
+
 ## Usage
 - Setup python environment using `requirements.txt`
 - Run `python src\fetchData.py` to fetch the data

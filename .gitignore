@@ -3,3 +3,16 @@ data
 .vscode/launch.json
 experiments/results/model.pth
 src/__pycache__/model.cpython-310.pyc
+lag-llama/configs
+lag-llama/data
+lag-llama/images
+lag-llama/scripts
+lag-llama/utils
+lag-llama/.gitignore
+lag-llama/LICENSE
+lag-llama/MANIFEST.in
+lag-llama/pyproject.toml
+lag-llama/README.md
+lag-llama/requirements.txt
+lag-llama/run.py
+lag-llama/VERSION
