@@ -18,13 +18,14 @@ from types import ModuleType
 
 from lag_llama.gluon.estimator import LagLlamaEstimator
 from gluonts.evaluation import make_evaluation_predictions
+from gluonts.dataset.common import ListDataset
 
 
 loss_func = nn.CrossEntropyLoss()
 
-def load_data(attacked=False, type='fgsm', model_type="1dcnn"):
+def load_data(attacked=False, att_type='fgsm', model_type="1dcnn"):
     if attacked:
-        attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_{model_type}.csv")
+        attacked_path = os.path.join("data", "processed", f"attacked_data_{att_type}_{model_type}.csv")
         if not os.path.exists(attacked_path):
             raise FileNotFoundError("Adversarial data not found. Please generate it first.")
         df = pd.read_csv(attacked_path, index_col=0)
@@ -40,11 +41,11 @@ def load_data(attacked=False, type='fgsm', model_type="1dcnn"):
 
     return prices, labels
 
-def evaluate_model(model_type="1dcnn", attacked=False, type='fgsm'):
+def evaluate_model(model_type="1dcnn", attacked=False, att_type='fgsm'):
     if model_type == "1dcnn":
-        return evaluate_model_1dcnn(attacked, type)
+        return evaluate_model_1dcnn(attacked, att_type)
     elif model_type =="llama":
-        return evaluate_model_llama(attacked, type)
+        return evaluate_model_llama(attacked, att_type)
 
 def evaluate_model_1dcnn(attacked=False, type='fgsm'):
     prices, labels = load_data(attacked, type)
@@ -121,61 +122,9 @@ def build_llama_predictor(prediction_length, context_length, num_samples, ckpt_p
         lightning_module = ""
     return predictor, lightning_module
 
-def evaluate_model_llama(attacked=False, type='fgsm'):
-    # Load financial data (prices and labels)
-    prices, labels = load_data(attacked, type)
-    
-    window_size = 28         # size of the input window (context)
-    prediction_length = 1    # predicting 1 step ahead
-    num_samples = 100        # number of samples from forecast distribution
-
-    ckpt_path = getLlamaModel()
-
-    # Build a predictor with context_length equal to the window_size
-    predictor, lightning_module = build_llama_predictor(prediction_length, context_length=window_size, num_samples=num_samples, ckpt_path=ckpt_path)
-    
-    all_true_labels = []
-    all_pred_labels = []
-    
-    # Loop over sliding windows of the price series
-    for i in range(len(prices) - window_size):
-        window = prices[i:i+window_size]
-        true_label = labels[i]  # label corresponds to whether prices[i+window_size] > prices[i+window_size-1]
-        
-        # Create a GluonTS dataset from the current window
-        window_dataset = get_window_dataset(window)
-        
-        # Generate forecast for the next step using Lag-Llama
-        forecast_it, ts_it = make_evaluation_predictions(
-            dataset=window_dataset,
-            predictor=predictor,
-            num_samples=num_samples
-        )
-        # Since there's one time series, get the first forecast object
-        forecast = list(forecast_it)[0]
-        # For prediction_length=1, the point forecast can be taken as the mean of the distribution
-        pred_price = forecast.mean[0]
-        # Derive predicted label: 1 if forecasted next price > last observed price, else 0
-        pred_label = 1 if pred_price > window[-1] else 0
-        
-        all_true_labels.append(true_label)
-        all_pred_labels.append(pred_label)
-    
-    # Compute average loss as the misclassification rate (or 1 - accuracy)
-    all_true_labels = np.array(all_true_labels)
-    all_pred_labels = np.array(all_pred_labels)
-    accuracy = np.mean(all_true_labels == all_pred_labels)
-    avg_loss = 1 - accuracy
-    
-    # Optionally, print or plot a few examples (omitted for brevity)
-    print("Accuracy:", accuracy)
-    print("Average Loss (Misclassification Rate):", avg_loss)
-    
-    return all_true_labels, all_pred_labels, avg_loss
-
 def fgsm_attack(model, x, y, epsilon=4.54):
     x_adv = x.clone().detach().requires_grad_(True)
-
+    #input_dict = {"past_target": x_adv.squeeze(-1)}  # shape becomes [1, context_length] 
     # Forward pass
     output = model(x_adv)
 
