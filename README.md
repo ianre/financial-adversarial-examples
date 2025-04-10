@@ -1,6 +1,11 @@
 # financial-adversarial-examples
 This repo aims to replicate the results in "Investigating machine learning attacks on financial time series models"
 
+## Setup
+- The 1D-CNN model is already setup
+- The lag-llama model requires some setup    
+    - To download the pre-trained example model, run `huggingface-cli download time-series-foundation-models/Lag-Llama lag-llama.ckpt --local-dir src\lag_llama\lag-llama`
+
 ## Usage
 - Setup python environment using `requirements.txt`
 - Run `python src\fetchData.py` to fetch the data
