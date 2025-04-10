@@ -4,11 +4,7 @@ data
 .vscode/launch.json
 experiments/results/model.pth
 src/__pycache__/model.cpython-310.pyc
-src/lag_llama/configs
-src/lag_llama/data
 src/lag_llama/images
-src/lag_llama/scripts
-src/lag_llama/utils
 src/lag_llama/.gitignore
 src/lag_llama/LICENSE
 src/lag_llama/MANIFEST.in
