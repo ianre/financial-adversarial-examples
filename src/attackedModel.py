@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import torch
 import torch.nn as nn
@@ -7,6 +8,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from lag_llama.model import TimeSeries, CNN1DModel, CNN1DModel2, evaluate_model, train_model
+from types import ModuleType
+from gluonts.dataset.pandas import PandasDataset
+from lag_llama.lag_llama.gluon.estimator import LagLlamaEstimator
+from gluonts.evaluation import make_evaluation_predictions, Evaluator
 
 
 loss_func = nn.CrossEntropyLoss()
@@ -172,6 +177,88 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
     adv_df.to_csv(attacked_path)
     print(f"Adversarial data saved to {attacked_path}")
 
+def create_dummy_module(module_path):
+    """
+    Create a dummy module hierarchy for the given path.
+    Returns the leaf module.
+    """
+    parts = module_path.split('.')
+    current = ''
+    parent = None
+
+    for part in parts:
+        current = current + '.' + part if current else part
+        if current not in sys.modules:
+            module = ModuleType(current)
+            sys.modules[current] = module
+            if parent:
+                setattr(sys.modules[parent], part, module)
+        parent = current
+
+    return sys.modules[module_path]
+# Create dummy classes for the specific loss functions
+class DistributionLoss:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        return 0.0
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+class NegativeLogLikelihood:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self, *args, **kwargs):
+        return 0.0
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+def get_lag_llama_predictions(dataset, prediction_length, device, context_length=32, use_rope_scaling=False, num_samples=100):
+    ckpt = torch.load("src\lag_llama\lag-llama\lag-llama.ckpt", map_location=device) # Uses GPU since in this Colab we use a GPU.
+    estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
+
+    rope_scaling_arguments = {
+        "type": "linear",
+        "factor": max(1.0, (context_length + prediction_length) / estimator_args["context_length"]),
+    }
+
+    estimator = LagLlamaEstimator(
+        ckpt_path="src\lag_llama\lag-llama\lag-llama.ckpt",
+        prediction_length=prediction_length,
+        context_length=context_length, # Lag-Llama was trained with a context length of 32, but can work with any context length
+
+        # estimator args
+        input_size=estimator_args["input_size"],
+        n_layer=estimator_args["n_layer"],
+        n_embd_per_head=estimator_args["n_embd_per_head"],
+        n_head=estimator_args["n_head"],
+        scaling=estimator_args["scaling"],
+        time_feat=estimator_args["time_feat"],
+        rope_scaling=rope_scaling_arguments if use_rope_scaling else None,
+
+        batch_size=1,
+        num_parallel_samples=100,
+        device=device,
+    )
+
+    lightning_module = estimator.create_lightning_module()
+    transformation = estimator.create_transformation()
+    predictor = estimator.create_predictor(transformation, lightning_module)
+
+    forecast_it, ts_it = make_evaluation_predictions(
+        dataset=dataset,
+        predictor=predictor,
+        num_samples=num_samples
+    )
+    forecasts = list(forecast_it)
+    tss = list(ts_it)
+
+    return forecasts, tss
+
 def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
     prices, labels = load_data(attacked=False) 
     # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
@@ -197,15 +284,49 @@ def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ckpt = torch.load("src/lag_llama/lag-llama/lag-llama.ckpt", map_location=device)
     estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
-    
 
-    
+    # Create the dummy gluonts module hierarchy
+    gluonts_module = create_dummy_module('gluonts.torch.modules.loss')
+
+    # Add the specific classes to the module
+    gluonts_module.DistributionLoss = DistributionLoss
+    gluonts_module.NegativeLogLikelihood = NegativeLogLikelihood
+
+        
     for i, (x, y) in enumerate(dataloader):
         # i = 0
         # x = tensor([[[217.8300, 222.8400, 225.8500, 233.0600, 233.6800, 235.1100, 236.0500,          232.0500, 233.3600, 233.7900, 222.6800, 218.4400, 199.9300, 213.9600,          221.7400, 216.7200, 217.3500, 216.9600, 213.6200, 216.5500, 201.0900,          198.2200, 190.9700, 192.7400, 184.1400, 184.7200, 179.5600, 181.4900]]])
         # y = tensor([0])
         if type == 'fgsm':
-            x_adv = fgsm_attack_llama(model, x, y, epsilon)
+            
+            x_np = x.detach().cpu().numpy()  # Shape: (N, 1, L)
+
+            # Step 2: Remove the singleton dimension to get shape (N, L)
+            x_flat = x_np.squeeze(1)  # Shape: (N, L)
+
+            # Step 3: Flatten the 2D array to 1D
+            target_values = x_flat.flatten()  # Shape: (N * L,)
+
+            # Step 4: Generate a datetime index starting from '2021-01-01 00:00:00' at 1-minute intervals
+            start_time = pd.Timestamp("2021-01-01 00:00:00")
+            datetime_index = pd.date_range(start=start_time, periods=target_values.shape[0], freq='T')
+
+            # Step 5: Create the DataFrame
+            df = pd.DataFrame({
+                'target': target_values,
+                'item_id': 'A'
+            }, index=datetime_index)
+
+            dataset = PandasDataset.from_long_dataframe(df, target="target", item_id="item_id")
+            
+            backtest_dataset = dataset
+            prediction_length = 24  # Define your prediction length. We use 24 here since the data is of hourly frequency
+            num_samples = 100 # number of samples sampled from the probability distribution for each timestep
+            device = torch.device("cuda:0") # You can switch this to CPU or other GPUs if you'd like, depending on your environment
+            forecasts, tss = get_lag_llama_predictions(backtest_dataset, prediction_length, device, num_samples)
+            print("forecasts:" + str(len(forecasts)))
+            print(forecasts[0].samples.shape)
+            x_adv = fgsm_attack_llama(model, x, y, epsilon)            
             # x_adv = tensor([[[213.2900, 218.3000, 230.3900, 228.5200, 229.1400, 239.6500, 240.5900,          227.5100, 228.8200, 229.2500, 227.2200, 222.9800, 204.4700, 209.4200,          226.2800, 212.1800, 221.8900, 212.4200, 209.0800, 221.0900, 205.6300,          193.6800, 186.4300, 197.2800, 179.6000, 180.1800, 175.0200, 186.0300]]])
         elif type == 'bim':
             x_adv = basic_iterative_method(model, x, y, epsilon, 20)

@@ -41,7 +41,7 @@ from data.augmentations.augmentations import (
 from gluon_utils.gluon_ts_distributions.implicit_quantile_network import (
     ImplicitQuantileNetworkOutput,
 )
-from lag_llama.model.module import LagLlamaModel
+from lag_llama.lag_llama.model.module import LagLlamaModel
 
 
 class LagLlamaLightningModule(LightningModule):

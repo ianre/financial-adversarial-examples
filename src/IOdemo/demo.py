@@ -14,9 +14,19 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import Qt
 import torch
 
-grandparent = Path(__file__).resolve().parents[1]   # 0 = IOdemo, 1 = src, 2 = financial-adversarial-examples
-sys.path.append(str(grandparent))
-
+#grandparent = Path(__file__).resolve().parents[1]   # 0 = IOdemo, 1 = src, 2 = financial-adversarial-examples
+#sys.path.append(str(grandparent))
+src_path = Path(__file__).resolve().parents[1]
+llama1_path = src_path.joinpath("lag_llama")
+data_path = src_path.joinpath("data")
+llama2_path = llama1_path.joinpath("lag_llama")
+print("############################ PATH")
+print(sys.path)
+sys.path.append(str(src_path))
+sys.path.append(str(llama1_path))
+sys.path.append(str(llama2_path))
+sys.path.append(str(data_path))
+print(sys.path)
 from attackedModel import (load_data, load_data_llama, fgsm_attack, basic_iterative_method,
                                     generate_adversarial_data, generate_adversarial_llama, evaluate_model)
 
