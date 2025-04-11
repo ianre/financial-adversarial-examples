@@ -2,10 +2,6 @@ import sys
 import os
 from pathlib import Path
 
-# Add the project root to Python path
-project_root = str(Path(__file__).parent.parent.parent)
-sys.path.append(project_root)
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,8 +13,12 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QSpinBox, QSplitter)
 from PyQt5.QtCore import Qt
 import torch
-from ..attackedModel import (load_data, fgsm_attack, basic_iterative_method,
-                                    generate_adversarial_data, evaluate_model)
+
+grandparent = Path(__file__).resolve().parents[1]   # 0 = IOdemo, 1 = src, 2 = financial-adversarial-examples
+sys.path.append(str(grandparent))
+
+from attackedModel import (load_data, load_data_llama, fgsm_attack, basic_iterative_method,
+                                    generate_adversarial_data, generate_adversarial_llama, evaluate_model)
 
 class AdversarialDemo(QMainWindow):
     def __init__(self):
@@ -105,15 +105,24 @@ class AdversarialDemo(QMainWindow):
         # Create right panel for plots
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+
+        # Create right panel for plots
+        right2_panel = QWidget()
+        right2_layout = QVBoxLayout(right2_panel)
         
         # Create matplotlib figure with two subplots
         self.figure = Figure(figsize=(8, 6))
         self.canvas = FigureCanvas(self.figure)
         right_layout.addWidget(self.canvas)
+        # Create another matplotlib figure with two subplots
+        self.figure2 = Figure(figsize=(8, 6))
+        self.canvas2 = FigureCanvas(self.figure2)
+        right2_layout.addWidget(self.canvas2)
         
         # Add panels to main layout
         layout.addWidget(left_panel, 1)
         layout.addWidget(right_panel, 2)
+        layout.addWidget(right2_panel, 2)
         
         # Connect signals
         self.stock_combo.currentTextChanged.connect(self.load_stock_data)
@@ -153,6 +162,7 @@ class AdversarialDemo(QMainWindow):
             
             # Plot the data
             self.plot_data()
+            self.plot_data2()
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load stock data: {str(e)}")
@@ -173,12 +183,19 @@ class AdversarialDemo(QMainWindow):
                 epsilon=self.epsilon,
                 type=attack_type
             )
+
+            generate_adversarial_llama(
+                epsilon=self.epsilon,
+                type=attack_type
+            )
             
             # Load the perturbed data
             self.perturbed_data, _ = load_data(attacked=True, type=attack_type)
+            self.perturbed_data2, _ = load_data_llama(attacked=True, type=attack_type)
             
             # Plot both original and perturbed data
             self.plot_data(show_perturbed=True)
+            self.plot_data2(show_perturbed=True)
             
             # Evaluate model performance
             self.evaluate_performance(attack_type)
@@ -194,6 +211,7 @@ class AdversarialDemo(QMainWindow):
             self.zoom_end = self.zoom_start + 1
             self.zoom_end_spin.setValue(self.zoom_end)
         self.plot_data(show_perturbed=self.perturbed_data is not None)
+        self.plot_data2(show_perturbed=self.perturbed_data2 is not None)
     
     def plot_data(self, show_perturbed=False):
         """Plot the time series data"""
@@ -236,6 +254,49 @@ class AdversarialDemo(QMainWindow):
         # Adjust layout
         self.figure.tight_layout()
         self.canvas.draw()
+
+    def plot_data2(self, show_perturbed=False):
+        """Plot the time series data"""
+        self.figure2.clear()
+        
+        # Create two subplots: one for the full view and one for the zoomed view
+        ax1 = self.figure2.add_subplot(211)
+        ax2 = self.figure2.add_subplot(212)
+        
+        if self.original_data is None:
+            return
+        
+        # Plot full view
+        ax1.plot(self.original_data, label='Original', alpha=0.7)
+        if show_perturbed and self.perturbed_data2 is not None:
+            ax1.plot(self.perturbed_data2, label='Perturbed', alpha=0.7)
+        ax1.set_title(f"Full View - Stock Price: {self.current_stock}")
+        ax1.set_xlabel("Time")
+        ax1.set_ylabel("Price")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot zoomed view
+        start_idx = max(0, min(self.zoom_start, len(self.original_data)))
+        end_idx = min(len(self.original_data), max(self.zoom_end, start_idx + 1))
+        
+        ax2.plot(range(start_idx, end_idx), 
+                self.original_data[start_idx:end_idx], 
+                label='Original', alpha=0.7)
+        if show_perturbed and self.perturbed_data2 is not None:
+            ax2.plot(range(start_idx, end_idx), 
+                    self.perturbed_data2[start_idx:end_idx], 
+                    label='Perturbed', alpha=0.7)
+        ax2.set_title(f"Zoomed View (Indices {start_idx}-{end_idx})")
+        ax2.set_xlabel("Time")
+        ax2.set_ylabel("Price")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Adjust layout
+        self.figure2.tight_layout()
+
+        self.canvas2.draw()
     
     def evaluate_performance(self, attack_type):
         """Evaluate model performance on original and perturbed data"""

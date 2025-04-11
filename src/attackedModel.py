@@ -6,13 +6,32 @@ import torch.nn.functional as F
 import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
-from model import TimeSeries, CNN1DModel, evaluate_model, train_model
+from lag_llama.model import TimeSeries, CNN1DModel, CNN1DModel2, evaluate_model, train_model
+
 
 loss_func = nn.CrossEntropyLoss()
 
 def load_data(attacked=False, type='fgsm'):
     if attacked:
         attacked_path = os.path.join("data", "processed", f"attacked_data_{type}.csv")
+        if not os.path.exists(attacked_path):
+            raise FileNotFoundError("Adversarial data not found. Please generate it first.")
+        df = pd.read_csv(attacked_path, index_col=0)
+        prices = df['Close'].values
+        labels = df['label'].values
+    else:
+        processed_path = os.path.join("data", "processed", "cleaned_data.csv")
+        df = pd.read_csv(processed_path, index_col=0)
+        prices = df['Close'].values
+        labels = (pd.Series(prices).shift(-1) > pd.Series(prices)).astype(int).values
+        prices = prices[:-1]
+        labels = labels[:-1]
+
+    return prices, labels
+
+def load_data_llama(attacked=False, type='fgsm'):
+    if attacked:
+        attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_llama.csv")
         if not os.path.exists(attacked_path):
             raise FileNotFoundError("Adversarial data not found. Please generate it first.")
         df = pd.read_csv(attacked_path, index_col=0)
@@ -152,6 +171,88 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
     print(f"Adversarial data saved to {attacked_path}")
+
+def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
+    prices, labels = load_data(attacked=False) 
+    # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
+    # labels=array([1, 1, 1, ..., 0, 0, 0])
+    
+    window_size = 28
+    dataset = TimeSeries(prices, labels, window_size=window_size)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    # dataloader=<torch.utils.data.dataloader.DataLoader object at 0x00000231FB8D3970>
+
+    model_path = os.path.join("experiments", "results", "model.pth")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError("Trained model not found. Please train the model first.")
+
+    model = CNN1DModel2()
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+
+    perturbed_series = prices.copy().astype(float)
+    # perturbed_series=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
+
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ckpt = torch.load("src/lag_llama/lag-llama/lag-llama.ckpt", map_location=device)
+    estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
+    
+
+    
+    for i, (x, y) in enumerate(dataloader):
+        # i = 0
+        # x = tensor([[[217.8300, 222.8400, 225.8500, 233.0600, 233.6800, 235.1100, 236.0500,          232.0500, 233.3600, 233.7900, 222.6800, 218.4400, 199.9300, 213.9600,          221.7400, 216.7200, 217.3500, 216.9600, 213.6200, 216.5500, 201.0900,          198.2200, 190.9700, 192.7400, 184.1400, 184.7200, 179.5600, 181.4900]]])
+        # y = tensor([0])
+        if type == 'fgsm':
+            x_adv = fgsm_attack_llama(model, x, y, epsilon)
+            # x_adv = tensor([[[213.2900, 218.3000, 230.3900, 228.5200, 229.1400, 239.6500, 240.5900,          227.5100, 228.8200, 229.2500, 227.2200, 222.9800, 204.4700, 209.4200,          226.2800, 212.1800, 221.8900, 212.4200, 209.0800, 221.0900, 205.6300,          193.6800, 186.4300, 197.2800, 179.6000, 180.1800, 175.0200, 186.0300]]])
+        elif type == 'bim':
+            x_adv = basic_iterative_method(model, x, y, epsilon, 20)
+        else:
+            raise ValueError("type must be either 'fgsm' or 'bim'")
+            
+        perturbed_window = x_adv.squeeze(0).squeeze(0).cpu().numpy()
+        perturbed_series[i:i + window_size] = perturbed_window
+        # perturbed_series = array([ 213.29000854,  218.30000305,  230.38999939, ..., 1065.85      ,       1060.2       , 1055.95      ])
+
+    adv_labels = (pd.Series(perturbed_series).shift(-1) > pd.Series(perturbed_series)).astype(int).values[:-1]
+    perturbed_series = perturbed_series[:-1]
+
+    # Save attacked portion
+    adv_df = pd.DataFrame({
+        "Close": perturbed_series,
+        "label": adv_labels
+    })
+
+    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_llama.csv")
+    os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
+    adv_df.to_csv(attacked_path)
+    print(f"Adversarial data saved to {attacked_path}")
+
+
+def fgsm_attack_llama(model, x, y, epsilon=4.54):
+    x_adv = x.clone().detach().requires_grad_(True)
+
+    # Forward pass
+    output = model(x_adv)
+
+    # Calculate ce loss
+    loss = loss_func(output, y)
+
+    # Zero existing grads
+    model.zero_grad()
+
+    # Compute grads of loss wrt x_adv
+    loss.backward()
+
+    # Get element wise sign of the data gradient
+    data_grad = x_adv.grad.data.sign()
+
+    # Apply perturbation
+    x_adv = x_adv + epsilon * data_grad
+
+    return x_adv.detach()
 
 def compare_predictions(attack_type):
     """
