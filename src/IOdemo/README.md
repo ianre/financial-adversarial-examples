@@ -18,9 +18,9 @@ This demo provides a graphical user interface for experimenting with adversarial
 
 ## Usage
 
-1. Run the demo:
+1. Run the demo from the root:
    ```bash
-   python adversarial_demo.py
+   python -m src.IOdemo.demo
    ```
 
 2. In the GUI:
@@ -46,4 +46,4 @@ This demo provides a graphical user interface for experimenting with adversarial
 
 ## Data Requirements
 
-The demo expects stock data in CSV format in the `data/raw` directory. Each CSV file should contain at least a 'Close' column with the closing prices. 
+The demo expects stock data in CSV format in the `data/raw` directory.
