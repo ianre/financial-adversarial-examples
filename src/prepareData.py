@@ -18,6 +18,10 @@ def splitTrainTest(input_path, filename, output_path):
     train_df.to_csv(train_path, index=False)
     eval_df.to_csv(eval_path, index=False)
 
+    # Create combined cleaned_data.csv
+    cleaned_path = os.path.join(os.path.dirname(output_path), "cleaned_data.csv")
+    df.to_csv(cleaned_path, index=False)
+
     return train_df, eval_df
 
 def show_data(df):

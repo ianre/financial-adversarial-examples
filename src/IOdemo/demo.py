@@ -158,6 +158,20 @@ class AdversarialDemo(QMainWindow):
             return
         
         try:
+            # First, process the new stock data
+            from prepareData import splitTrainTest
+            import os
+            
+            # Define paths
+            raw_path = os.path.join("data", "raw")
+            processed_dir = os.path.join("data", "processed")
+            os.makedirs(processed_dir, exist_ok=True)
+            processed_path = os.path.join(processed_dir, "cleaned_data.csv")
+            
+            # Process the new stock data
+            train_df, eval_df = splitTrainTest(raw_path, f"{stock_name}.csv", processed_path)
+            
+            # Read the processed data for display
             file_path = Path("data/raw") / f"{stock_name}.csv"
             df = pd.read_csv(file_path)
             
