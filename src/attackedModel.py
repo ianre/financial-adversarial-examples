@@ -152,9 +152,26 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
 
     perturbed_series = prices.copy().astype(float)
 
+    idx = 0
     for i, (x, y) in enumerate(dataloader):
+        idx+=1
         if type == 'fgsm':
+
             x_adv = fgsm_attack(model, x, y, epsilon)
+            '''
+            print("# fgsm_attack input x:" + str(x.shape) + "  x_adv:" + str(x_adv.shape))   
+            x1 = x.squeeze().detach().cpu().numpy()
+            x_adv1 = x_adv.squeeze().detach().cpu().numpy()
+            perturbation = x_adv1 - x1
+
+            df = pd.DataFrame({
+                "Timestep": list(range(len(x1))),
+                "Original": x1,
+                "Adversarial": x_adv1,
+                "Perturbation": perturbation
+            })
+            print(df)
+            '''
         elif type == 'bim':
             x_adv = basic_iterative_method(model, x, y, epsilon, 20)
         else:
@@ -175,6 +192,7 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
     attacked_path = os.path.join("data", "processed", f"attacked_data_{type}.csv")
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
+    print("generate_adversarial_data iters:" + str(idx))
     print(f"Adversarial data saved to {attacked_path}")
 
 def create_dummy_module(module_path):
@@ -217,8 +235,8 @@ class NegativeLogLikelihood:
     def __getattr__(self, name):
         return lambda *args, **kwargs: None
 
-def get_lag_llama_predictions(dataset, prediction_length, device, context_length=32, use_rope_scaling=False, num_samples=100):
-    ckpt = torch.load("src\lag_llama\lag-llama\lag-llama.ckpt", map_location=device) # Uses GPU since in this Colab we use a GPU.
+def get_lag_llama_predictions(ckpt, dataset, prediction_length, device, context_length=32, use_rope_scaling=False, num_samples=100):
+    #ckpt = torch.load("src\lag_llama\lag-llama\lag-llama.ckpt", map_location=device) # Uses GPU since in this Colab we use a GPU.
     estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
 
     rope_scaling_arguments = {
@@ -260,7 +278,7 @@ def get_lag_llama_predictions(dataset, prediction_length, device, context_length
     return forecasts, tss
 
 def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False) 
+    prices, labels = load_data(attacked=False)
     # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
     # labels=array([1, 1, 1, ..., 0, 0, 0])
     
@@ -292,51 +310,93 @@ def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
     gluonts_module.DistributionLoss = DistributionLoss
     gluonts_module.NegativeLogLikelihood = NegativeLogLikelihood
 
-        
+    idx = 0
     for i, (x, y) in enumerate(dataloader):
+        idx+=1
         # i = 0
         # x = tensor([[[217.8300, 222.8400, 225.8500, 233.0600, 233.6800, 235.1100, 236.0500,          232.0500, 233.3600, 233.7900, 222.6800, 218.4400, 199.9300, 213.9600,          221.7400, 216.7200, 217.3500, 216.9600, 213.6200, 216.5500, 201.0900,          198.2200, 190.9700, 192.7400, 184.1400, 184.7200, 179.5600, 181.4900]]])
         # y = tensor([0])
         if type == 'fgsm':
-            
             x_np = x.detach().cpu().numpy()  # Shape: (N, 1, L)
+            # Convert tensor to numpy array
+            x_np2 = x.squeeze().numpy()  # Shape: (28,)
 
-            # Step 2: Remove the singleton dimension to get shape (N, L)
-            x_flat = x_np.squeeze(1)  # Shape: (N, L)
-
-            # Step 3: Flatten the 2D array to 1D
-            target_values = x_flat.flatten()  # Shape: (N * L,)
-
-            # Step 4: Generate a datetime index starting from '2021-01-01 00:00:00' at 1-minute intervals
-            start_time = pd.Timestamp("2021-01-01 00:00:00")
-            datetime_index = pd.date_range(start=start_time, periods=target_values.shape[0], freq='T')
-
-            # Step 5: Create the DataFrame
+            date_index = pd.date_range(start="2025-01-01", periods=len(x_np2), freq="D")
             df = pd.DataFrame({
-                'target': target_values,
-                'item_id': 'A'
-            }, index=datetime_index)
+                "item_id": ["series_1"] * len(x_np2),
+                "timestamp": date_index,
+                "target": x_np2
+            })
 
-            dataset = PandasDataset.from_long_dataframe(df, target="target", item_id="item_id")
-            
+            dataset = PandasDataset.from_long_dataframe(df, target="target", item_id="item_id")            
+
             backtest_dataset = dataset
             prediction_length = 24  # Define your prediction length. We use 24 here since the data is of hourly frequency
             num_samples = 100 # number of samples sampled from the probability distribution for each timestep
             device = torch.device("cuda:0") # You can switch this to CPU or other GPUs if you'd like, depending on your environment
-            forecasts, tss = get_lag_llama_predictions(backtest_dataset, prediction_length, device, num_samples)
-            print("forecasts:" + str(len(forecasts)))
-            print(forecasts[0].samples.shape)
-            x_adv = fgsm_attack_llama(model, x, y, epsilon)            
+            
+            forecasts, tss = get_lag_llama_predictions(ckpt, backtest_dataset, prediction_length, device, num_samples, ckpt)
+            
+            #print("forecasts:" + str(len(forecasts)))
+            #print(forecasts[0].samples.mean())
+            #print(forecasts[0].samples.shape)
+            #print(forecasts[0].samples)
+            samples_tensor = torch.from_numpy(forecasts[0].samples).float()  # Convert to float32 tensor
+            #print(samples_tensor)
+            mean_prediction = samples_tensor.mean(dim=0)  # Shape: (24,)
+
+            # Step 2: Pad the sequence to length 28 if necessary
+            desired_length = 28
+            current_length = mean_prediction.shape[0]
+            if current_length < desired_length:
+                padding = torch.zeros(desired_length - current_length)
+                mean_prediction = torch.cat((mean_prediction, padding), dim=0)
+            elif current_length > desired_length:
+                mean_prediction = mean_prediction[:desired_length]
+
+            # Step 3: Reshape to (1, 1, 28)
+            final_tensor = mean_prediction.view(1, 1, desired_length)
+            #print(final_tensor)
+            #print(final_tensor.shape)
+            x_adv = x.clone().detach().requires_grad_(True)
+            #print(x_adv)
+            #print(x_adv.shape)
+
+            x_adv_clean = x.clone().detach().requires_grad_(True)
+            comparison_mask = final_tensor > x_adv
+            multiplier = comparison_mask.float() * 2 - 1  # Tensor with values 1.0 or -1.0
+
+            # Step 3: Adjust the target tensor
+            x_adv_clean = x_adv_clean + epsilon * multiplier
+            x_adv = x_adv_clean
+            #print(x_adv_clean)
+            #print(x_adv_clean.shape)
+                        
+            #x_adv = fgsm_attack_llama(model, x, y, epsilon)
+            '''
+            x1 = x.squeeze().detach().cpu().numpy()
+            x_adv1 = x_adv_clean.squeeze().detach().cpu().numpy()
+            perturbation = x_adv1 - x1
+
+            df = pd.DataFrame({
+                "Timestep": list(range(len(x1))),
+                "Original": x1,
+                "Adversarial": x_adv1,
+                "Perturbation": perturbation
+            })
+            print(df)
+            '''
+
             # x_adv = tensor([[[213.2900, 218.3000, 230.3900, 228.5200, 229.1400, 239.6500, 240.5900,          227.5100, 228.8200, 229.2500, 227.2200, 222.9800, 204.4700, 209.4200,          226.2800, 212.1800, 221.8900, 212.4200, 209.0800, 221.0900, 205.6300,          193.6800, 186.4300, 197.2800, 179.6000, 180.1800, 175.0200, 186.0300]]])
         elif type == 'bim':
             x_adv = basic_iterative_method(model, x, y, epsilon, 20)
         else:
             raise ValueError("type must be either 'fgsm' or 'bim'")
             
-        perturbed_window = x_adv.squeeze(0).squeeze(0).cpu().numpy()
+        perturbed_window = x_adv.detach().numpy() #. squeeze(0).squeeze(0).cpu().numpy()
         perturbed_series[i:i + window_size] = perturbed_window
         # perturbed_series = array([ 213.29000854,  218.30000305,  230.38999939, ..., 1065.85      ,       1060.2       , 1055.95      ])
-
+        if idx % 100 == 0: print("llama progress " + str(idx))
     adv_labels = (pd.Series(perturbed_series).shift(-1) > pd.Series(perturbed_series)).astype(int).values[:-1]
     perturbed_series = perturbed_series[:-1]
 
@@ -350,6 +410,73 @@ def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
     print(f"Adversarial data saved to {attacked_path}")
+
+
+def gen_llama_speed_test(epsilon=4.54, type='fgsm'):
+    prices, labels = load_data(attacked=False)
+    # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
+    # labels=array([1, 1, 1, ..., 0, 0, 0])
+    
+    window_size = 28
+    dataset = TimeSeries(prices, labels, window_size=window_size)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    # dataloader=<torch.utils.data.dataloader.DataLoader object at 0x00000231FB8D3970>
+
+    model_path = os.path.join("experiments", "results", "model.pth")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError("Trained model not found. Please train the model first.")
+
+    model = CNN1DModel2()
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+
+    perturbed_series = prices.copy().astype(float)
+    # perturbed_series=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
+
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    ckpt = torch.load("src/lag_llama/lag-llama/lag-llama.ckpt", map_location=device)
+    estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
+
+    # Create the dummy gluonts module hierarchy
+    gluonts_module = create_dummy_module('gluonts.torch.modules.loss')
+
+    # Add the specific classes to the module
+    gluonts_module.DistributionLoss = DistributionLoss
+    gluonts_module.NegativeLogLikelihood = NegativeLogLikelihood
+
+    idx = 0
+    for i, (x, y) in enumerate(dataloader):
+        idx+=1
+        # i = 0
+        # x = tensor([[[217.8300, 222.8400, 225.8500, 233.0600, 233.6800, 235.1100, 236.0500,          232.0500, 233.3600, 233.7900, 222.6800, 218.4400, 199.9300, 213.9600,          221.7400, 216.7200, 217.3500, 216.9600, 213.6200, 216.5500, 201.0900,          198.2200, 190.9700, 192.7400, 184.1400, 184.7200, 179.5600, 181.4900]]])
+        # y = tensor([0])
+        if type == 'fgsm':
+            x_adv = x
+            # x_adv = tensor([[[213.2900, 218.3000, 230.3900, 228.5200, 229.1400, 239.6500, 240.5900,          227.5100, 228.8200, 229.2500, 227.2200, 222.9800, 204.4700, 209.4200,          226.2800, 212.1800, 221.8900, 212.4200, 209.0800, 221.0900, 205.6300,          193.6800, 186.4300, 197.2800, 179.6000, 180.1800, 175.0200, 186.0300]]])
+        elif type == 'bim':
+            x_adv = basic_iterative_method(model, x, y, epsilon, 20)
+        else:
+            raise ValueError("type must be either 'fgsm' or 'bim'")
+            
+        perturbed_window = x_adv.detach().numpy() #. squeeze(0).squeeze(0).cpu().numpy()
+        perturbed_series[i:i + window_size] = perturbed_window
+        # perturbed_series = array([ 213.29000854,  218.30000305,  230.38999939, ..., 1065.85      ,       1060.2       , 1055.95      ])
+        if idx % 100 == 0: print("llama progress " + str(idx))
+    adv_labels = (pd.Series(perturbed_series).shift(-1) > pd.Series(perturbed_series)).astype(int).values[:-1]
+    perturbed_series = perturbed_series[:-1]
+
+    # Save attacked portion
+    adv_df = pd.DataFrame({
+        "Close": perturbed_series,
+        "label": adv_labels
+    })
+
+    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_llama.csv")
+    os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
+    adv_df.to_csv(attacked_path)
+    print(f"Adversarial data saved to {attacked_path}")
+
 
 
 def fgsm_attack_llama(model, x, y, epsilon=4.54):
