@@ -14,3 +14,4 @@ src/lag_llama/requirements.txt
 src/lag_llama/run.py
 src/lag_llama/VERSION
 *.pyc
+/envcpu
