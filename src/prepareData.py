@@ -18,6 +18,15 @@ def splitTrainTest(input_path, filename, output_path):
     train_df.to_csv(train_path, index=False)
     eval_df.to_csv(eval_path, index=False)
 
+    #print(train_df)
+    #print(eval_df)
+    '''
+    # Create combined cleaned_data.csv
+    cleaned_path = os.path.join(os.path.dirname(output_path), "cleaned_data.csv")
+    df.to_csv(cleaned_path, index=False)
+    '''
+    train_df.to_csv(output_path, index=False)
+
     return train_df, eval_df
 
 def show_data(df):
@@ -40,17 +49,47 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Preprocess Financial Time Series Data")
     parser.add_argument("--file", default=INPUT_FILE, type=str, help="Raw CSV filename located in data/raw directory.")
     parser.add_argument("--show", action="store_true", help="plot dataset")
+    parser.add_argument("--all",  action="store_true", help="do all")
+
     args = parser.parse_args()
 
-    raw_path = os.path.join("data", "raw")
-    processed_dir = os.path.join("data", "processed")
-    os.makedirs(processed_dir, exist_ok=True)
-    
-    processed_path = os.path.join(processed_dir, "cleaned_data.csv")
+    if (args.all):
+        for filename in os.listdir('data\\raw'):
+            file_path = os.path.join('data\\raw', filename)
+            if os.path.isfile(file_path):
+                print(filename)  # Just the name, not the full path
+                raw_path = os.path.join("data", "raw")
+                processed_dir = os.path.join("data", "processed")
+                os.makedirs(processed_dir, exist_ok=True)
 
-    train_df, eval_df = splitTrainTest(raw_path, args.file, processed_path)
-    print("Data preprocessed and saved to:", processed_path)
+                dataID = str(filename).replace(".csv","")
+                
+                processed_path = os.path.join(processed_dir, f"cleaned_data_{dataID}.csv" )
 
-    if args.show:
-        show_data(train_df)
-        show_data(eval_df)
+                train_df, eval_df = splitTrainTest(raw_path, args.file, processed_path)
+                print("Data preprocessed and saved to:", processed_path)
+
+                if args.show:
+                    show_data(train_df)
+                    show_data(eval_df)
+                
+
+
+    else:
+
+
+
+        raw_path = os.path.join("data", "raw")
+        processed_dir = os.path.join("data", "processed")
+        os.makedirs(processed_dir, exist_ok=True)
+
+        dataID = str(args.file).replace(".csv","")
+        
+        processed_path = os.path.join(processed_dir, f"cleaned_data_{dataID}.csv" )
+
+        train_df, eval_df = splitTrainTest(raw_path, args.file, processed_path)
+        print("Data preprocessed and saved to:", processed_path)
+
+        if args.show:
+            show_data(train_df)
+            show_data(eval_df)

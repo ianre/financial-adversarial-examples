@@ -42,6 +42,27 @@ class CNN1DModel(nn.Module):
         x = torch.sigmoid(x)
         return x
 
+
+class CNN1DModel2(nn.Module):
+    def __init__(self):
+        super(CNN1DModel2, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3, padding=1, stride=1)
+        self.conv2 = nn.Conv1d(in_channels=32, out_channels=3, kernel_size=3, padding=1, stride=1)
+        self.fc1 = nn.Linear(84, 250)
+        self.fc2 = nn.Linear(250, 2)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = F.relu(x, inplace=True)
+        x = self.conv2(x)
+        x = F.relu(x, inplace=True)
+        x = x.view(x.size(0), -1)
+        x = self.fc1(x)
+        x = F.relu(x, inplace=True)
+        x = self.fc2(x)
+        x = torch.rrelu(x)
+        return x
+
 def load_data():
     attacked_path = os.path.join("data", "processed", "attacked_data.csv")
     if os.path.exists(attacked_path):
@@ -69,7 +90,7 @@ def train_model():
     optimizer = optim.SGD(model.parameters(), lr=1.71176e-5, momentum=0.081)
     criterion = nn.BCELoss()
 
-    epochs = 10
+    epochs = 1000
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0

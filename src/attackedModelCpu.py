@@ -9,23 +9,21 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from lag_llama.model import TimeSeries, CNN1DModel, CNN1DModel2, evaluate_model, train_model
 from types import ModuleType
-from gluonts.dataset.pandas import PandasDataset
-from lag_llama.lag_llama.gluon.estimator import LagLlamaEstimator
-from gluonts.evaluation import make_evaluation_predictions, Evaluator
 
 
 loss_func = nn.CrossEntropyLoss()
 
-def load_data(attacked=False, type='fgsm'):
+def load_data(attacked=False, type='fgsm', dataID="GOOGL_2006-01-01_to_2018-01-01"):
     if attacked:
-        attacked_path = os.path.join("data", "processed", f"attacked_data_{type}.csv")
+        attacked_path = os.path.join("data", "processed", f"attacked_data_{dataID}_{type}.csv")
         if not os.path.exists(attacked_path):
             raise FileNotFoundError("Adversarial data not found. Please generate it first.")
         df = pd.read_csv(attacked_path, index_col=0)
         prices = df['Close'].values
         labels = df['label'].values
     else:
-        processed_path = os.path.join("data", "processed", "cleaned_data.csv")
+        if dataID=="": dataID="GOOGL_2006-01-01_to_2018-01-01"
+        processed_path = os.path.join("data", "processed", f"cleaned_data_{dataID}.csv")
         df = pd.read_csv(processed_path, index_col=0)
         prices = df['Close'].values
         labels = (pd.Series(prices).shift(-1) > pd.Series(prices)).astype(int).values
@@ -52,8 +50,8 @@ def load_data_llama(attacked=False, type='fgsm'):
 
     return prices, labels
 
-def evaluate_model(attacked=False, type='fgsm'):
-    prices, labels = load_data(attacked, type)
+def evaluate_model(attacked=False, type='fgsm', dataID=""):
+    prices, labels = load_data(attacked, type, dataID=dataID)
 
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
@@ -195,8 +193,8 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
     print("generate_adversarial_data iters:" + str(idx))
     print(f"Adversarial data saved to {attacked_path}")
 
-def generate_adversarial_data_cpu(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False)
+def generate_adversarial_data_cpu(epsilon=4.54, type='fgsm', dataID=""):
+    prices, labels = load_data(attacked=False, dataID=dataID)
     
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
@@ -249,231 +247,14 @@ def generate_adversarial_data_cpu(epsilon=4.54, type='fgsm'):
         "label": adv_labels
     })
 
-    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}.csv")
+    attacked_path = os.path.join("data", "processed", f"attacked_data_{dataID}_{type}.csv")
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
     print("generate_adversarial_data iters:" + str(idx))
     print(f"Adversarial data saved to {attacked_path}")
 
-def create_dummy_module(module_path):
-    """
-    Create a dummy module hierarchy for the given path.
-    Returns the leaf module.
-    """
-    parts = module_path.split('.')
-    current = ''
-    parent = None
-
-    for part in parts:
-        current = current + '.' + part if current else part
-        if current not in sys.modules:
-            module = ModuleType(current)
-            sys.modules[current] = module
-            if parent:
-                setattr(sys.modules[parent], part, module)
-        parent = current
-
-    return sys.modules[module_path]
-# Create dummy classes for the specific loss functions
-class DistributionLoss:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def __call__(self, *args, **kwargs):
-        return 0.0
-
-    def __getattr__(self, name):
-        return lambda *args, **kwargs: None
-
-class NegativeLogLikelihood:
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def __call__(self, *args, **kwargs):
-        return 0.0
-
-    def __getattr__(self, name):
-        return lambda *args, **kwargs: None
-
-def get_lag_llama_predictions(ckpt, dataset, prediction_length, device, context_length=32, use_rope_scaling=False, num_samples=100):
-    #ckpt = torch.load("src\lag_llama\lag-llama\lag-llama.ckpt", map_location=device) # Uses GPU since in this Colab we use a GPU.
-    estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
-
-    rope_scaling_arguments = {
-        "type": "linear",
-        "factor": max(1.0, (context_length + prediction_length) / estimator_args["context_length"]),
-    }
-
-    estimator = LagLlamaEstimator(
-        ckpt_path="src\lag_llama\lag-llama\lag-llama.ckpt",
-        prediction_length=prediction_length,
-        context_length=context_length, # Lag-Llama was trained with a context length of 32, but can work with any context length
-
-        # estimator args
-        input_size=estimator_args["input_size"],
-        n_layer=estimator_args["n_layer"],
-        n_embd_per_head=estimator_args["n_embd_per_head"],
-        n_head=estimator_args["n_head"],
-        scaling=estimator_args["scaling"],
-        time_feat=estimator_args["time_feat"],
-        rope_scaling=rope_scaling_arguments if use_rope_scaling else None,
-
-        batch_size=1,
-        num_parallel_samples=100,
-        device=device,
-    )
-
-    lightning_module = estimator.create_lightning_module()
-    transformation = estimator.create_transformation()
-    predictor = estimator.create_predictor(transformation, lightning_module)
-
-    forecast_it, ts_it = make_evaluation_predictions(
-        dataset=dataset,
-        predictor=predictor,
-        num_samples=num_samples
-    )
-    forecasts = list(forecast_it)
-    tss = list(ts_it)
-
-    return forecasts, tss
-
-def generate_adversarial_llama(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False)
-    # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
-    # labels=array([1, 1, 1, ..., 0, 0, 0])
-    
-    window_size = 28
-    dataset = TimeSeries(prices, labels, window_size=window_size)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-    # dataloader=<torch.utils.data.dataloader.DataLoader object at 0x00000231FB8D3970>
-
-    model_path = os.path.join("experiments", "results", "model.pth")
-    if not os.path.exists(model_path):
-        raise FileNotFoundError("Trained model not found. Please train the model first.")
-
-    model = CNN1DModel2()
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-
-    perturbed_series = prices.copy().astype(float)
-    # perturbed_series=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
-
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = torch.load("src/lag_llama/lag-llama/lag-llama.ckpt", map_location=device)
-    estimator_args = ckpt["hyper_parameters"]["model_kwargs"]
-
-    # Create the dummy gluonts module hierarchy
-    gluonts_module = create_dummy_module('gluonts.torch.modules.loss')
-
-    # Add the specific classes to the module
-    gluonts_module.DistributionLoss = DistributionLoss
-    gluonts_module.NegativeLogLikelihood = NegativeLogLikelihood
-
-    idx = 0
-    for i, (x, y) in enumerate(dataloader):
-        idx+=1
-        # i = 0
-        # x = tensor([[[217.8300, 222.8400, 225.8500, 233.0600, 233.6800, 235.1100, 236.0500,          232.0500, 233.3600, 233.7900, 222.6800, 218.4400, 199.9300, 213.9600,          221.7400, 216.7200, 217.3500, 216.9600, 213.6200, 216.5500, 201.0900,          198.2200, 190.9700, 192.7400, 184.1400, 184.7200, 179.5600, 181.4900]]])
-        # y = tensor([0])
-        if type == 'fgsm':
-            x_np = x.detach().cpu().numpy()  # Shape: (N, 1, L)
-            # Convert tensor to numpy array
-            x_np2 = x.squeeze().numpy()  # Shape: (28,)
-
-            date_index = pd.date_range(start="2025-01-01", periods=len(x_np2), freq="D")
-            df = pd.DataFrame({
-                "item_id": ["series_1"] * len(x_np2),
-                "timestamp": date_index,
-                "target": x_np2
-            })
-
-            dataset = PandasDataset.from_long_dataframe(df, target="target", item_id="item_id")            
-
-            backtest_dataset = dataset
-            prediction_length = 24  # Define your prediction length. We use 24 here since the data is of hourly frequency
-            num_samples = 100 # number of samples sampled from the probability distribution for each timestep
-            device = torch.device("cuda:0") # You can switch this to CPU or other GPUs if you'd like, depending on your environment
-            
-            forecasts, tss = get_lag_llama_predictions(ckpt, backtest_dataset, prediction_length, device, num_samples, ckpt)
-            
-            #print("forecasts:" + str(len(forecasts)))
-            #print(forecasts[0].samples.mean())
-            #print(forecasts[0].samples.shape)
-            #print(forecasts[0].samples)
-            samples_tensor = torch.from_numpy(forecasts[0].samples).float()  # Convert to float32 tensor
-            #print(samples_tensor)
-            mean_prediction = samples_tensor.mean(dim=0)  # Shape: (24,)
-
-            # Step 2: Pad the sequence to length 28 if necessary
-            desired_length = 28
-            current_length = mean_prediction.shape[0]
-            if current_length < desired_length:
-                padding = torch.zeros(desired_length - current_length)
-                mean_prediction = torch.cat((mean_prediction, padding), dim=0)
-            elif current_length > desired_length:
-                mean_prediction = mean_prediction[:desired_length]
-
-            # Step 3: Reshape to (1, 1, 28)
-            final_tensor = mean_prediction.view(1, 1, desired_length)
-            #print(final_tensor)
-            #print(final_tensor.shape)
-            x_adv = x.clone().detach().requires_grad_(True)
-            #print(x_adv)
-            #print(x_adv.shape)
-
-            x_adv_clean = x.clone().detach().requires_grad_(True)
-            comparison_mask = final_tensor > x_adv
-            multiplier = comparison_mask.float() * 2 - 1  # Tensor with values 1.0 or -1.0
-
-            # Step 3: Adjust the target tensor
-            x_adv_clean = x_adv_clean + epsilon * multiplier
-            x_adv = x_adv_clean
-            #print(x_adv_clean)
-            #print(x_adv_clean.shape)
-                        
-            #x_adv = fgsm_attack_llama(model, x, y, epsilon)
-            '''
-            x1 = x.squeeze().detach().cpu().numpy()
-            x_adv1 = x_adv_clean.squeeze().detach().cpu().numpy()
-            perturbation = x_adv1 - x1
-
-            df = pd.DataFrame({
-                "Timestep": list(range(len(x1))),
-                "Original": x1,
-                "Adversarial": x_adv1,
-                "Perturbation": perturbation
-            })
-            print(df)
-            '''
-
-            # x_adv = tensor([[[213.2900, 218.3000, 230.3900, 228.5200, 229.1400, 239.6500, 240.5900,          227.5100, 228.8200, 229.2500, 227.2200, 222.9800, 204.4700, 209.4200,          226.2800, 212.1800, 221.8900, 212.4200, 209.0800, 221.0900, 205.6300,          193.6800, 186.4300, 197.2800, 179.6000, 180.1800, 175.0200, 186.0300]]])
-        elif type == 'bim':
-            x_adv = basic_iterative_method(model, x, y, epsilon, 20)
-        else:
-            raise ValueError("type must be either 'fgsm' or 'bim'")
-            
-        perturbed_window = x_adv.detach().numpy() #. squeeze(0).squeeze(0).cpu().numpy()
-        perturbed_series[i:i + window_size] = perturbed_window
-        # perturbed_series = array([ 213.29000854,  218.30000305,  230.38999939, ..., 1065.85      ,       1060.2       , 1055.95      ])
-        if idx % 100 == 0: print("llama progress " + str(idx))
-    adv_labels = (pd.Series(perturbed_series).shift(-1) > pd.Series(perturbed_series)).astype(int).values[:-1]
-    perturbed_series = perturbed_series[:-1]
-
-    # Save attacked portion
-    adv_df = pd.DataFrame({
-        "Close": perturbed_series,
-        "label": adv_labels
-    })
-
-    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_llama.csv")
-    os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
-    adv_df.to_csv(attacked_path)
-    print(f"Adversarial data saved to {attacked_path}")
-
-
-def generate_adversarial_llama_cpu(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False)
+def generate_adversarial_llama_cpu(epsilon=4.54, type='fgsm', dataID=""):
+    prices, labels = load_data(attacked=False, dataID=dataID)
     # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
     # labels=array([1, 1, 1, ..., 0, 0, 0])
     
@@ -513,35 +294,10 @@ def generate_adversarial_llama_cpu(epsilon=4.54, type='fgsm'):
         "label": adv_labels
     })
 
-    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_llama.csv")
+    attacked_path = os.path.join("data", "processed", f"attacked_data_{dataID}_{type}_llama.csv")
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
     print(f"Adversarial data saved to {attacked_path}")
-
-
-
-def fgsm_attack_llama(model, x, y, epsilon=4.54):
-    x_adv = x.clone().detach().requires_grad_(True)
-
-    # Forward pass
-    output = model(x_adv)
-
-    # Calculate ce loss
-    loss = loss_func(output, y)
-
-    # Zero existing grads
-    model.zero_grad()
-
-    # Compute grads of loss wrt x_adv
-    loss.backward()
-
-    # Get element wise sign of the data gradient
-    data_grad = x_adv.grad.data.sign()
-
-    # Apply perturbation
-    x_adv = x_adv + epsilon * data_grad
-
-    return x_adv.detach()
 
 def compare_predictions(attack_type):
     """
