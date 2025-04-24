@@ -13,16 +13,17 @@ from types import ModuleType
 
 loss_func = nn.CrossEntropyLoss()
 
-def load_data(attacked=False, type='fgsm'):
+def load_data(attacked=False, type='fgsm', dataID="GOOGL_2006-01-01_to_2018-01-01"):
     if attacked:
-        attacked_path = os.path.join("data", "processed", f"attacked_data_{type}.csv")
+        attacked_path = os.path.join("data", "processed", f"attacked_data_{dataID}_{type}.csv")
         if not os.path.exists(attacked_path):
             raise FileNotFoundError("Adversarial data not found. Please generate it first.")
         df = pd.read_csv(attacked_path, index_col=0)
         prices = df['Close'].values
         labels = df['label'].values
     else:
-        processed_path = os.path.join("data", "processed", "cleaned_data.csv")
+        if dataID=="": dataID="GOOGL_2006-01-01_to_2018-01-01"
+        processed_path = os.path.join("data", "processed", f"cleaned_data_{dataID}.csv")
         df = pd.read_csv(processed_path, index_col=0)
         prices = df['Close'].values
         labels = (pd.Series(prices).shift(-1) > pd.Series(prices)).astype(int).values
@@ -49,8 +50,8 @@ def load_data_llama(attacked=False, type='fgsm'):
 
     return prices, labels
 
-def evaluate_model(attacked=False, type='fgsm'):
-    prices, labels = load_data(attacked, type)
+def evaluate_model(attacked=False, type='fgsm', dataID=""):
+    prices, labels = load_data(attacked, type, dataID=dataID)
 
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
@@ -192,8 +193,8 @@ def generate_adversarial_data(epsilon=4.54, type='fgsm'):
     print("generate_adversarial_data iters:" + str(idx))
     print(f"Adversarial data saved to {attacked_path}")
 
-def generate_adversarial_data_cpu(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False)
+def generate_adversarial_data_cpu(epsilon=4.54, type='fgsm', dataID=""):
+    prices, labels = load_data(attacked=False, dataID=dataID)
     
     window_size = 28
     dataset = TimeSeries(prices, labels, window_size=window_size)
@@ -246,14 +247,14 @@ def generate_adversarial_data_cpu(epsilon=4.54, type='fgsm'):
         "label": adv_labels
     })
 
-    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}.csv")
+    attacked_path = os.path.join("data", "processed", f"attacked_data_{dataID}_{type}.csv")
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
     print("generate_adversarial_data iters:" + str(idx))
     print(f"Adversarial data saved to {attacked_path}")
 
-def generate_adversarial_llama_cpu(epsilon=4.54, type='fgsm'):
-    prices, labels = load_data(attacked=False)
+def generate_adversarial_llama_cpu(epsilon=4.54, type='fgsm', dataID=""):
+    prices, labels = load_data(attacked=False, dataID=dataID)
     # prices=array([ 217.83,  222.84,  225.85, ..., 1065.85, 1060.2 , 1055.95])
     # labels=array([1, 1, 1, ..., 0, 0, 0])
     
@@ -293,7 +294,7 @@ def generate_adversarial_llama_cpu(epsilon=4.54, type='fgsm'):
         "label": adv_labels
     })
 
-    attacked_path = os.path.join("data", "processed", f"attacked_data_{type}_llama.csv")
+    attacked_path = os.path.join("data", "processed", f"attacked_data_{dataID}_{type}_llama.csv")
     os.makedirs(os.path.dirname(attacked_path), exist_ok=True)
     adv_df.to_csv(attacked_path)
     print(f"Adversarial data saved to {attacked_path}")

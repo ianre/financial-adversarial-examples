@@ -149,7 +149,7 @@ class AdversarialDemo(QMainWindow):
             return
         
         for file in raw_dir.glob("*.csv"):
-            self.stock_combo.addItem(file.stem)
+            self.stock_combo.addItem(str(file.stem).replace(".csv",""))
     
     def load_stock_data(self, stock_name):
         """Load and display the selected stock's data"""
@@ -157,6 +157,7 @@ class AdversarialDemo(QMainWindow):
             return
         
         try:
+            '''
             # First, process the new stock data
             from prepareData import splitTrainTest
             import os
@@ -172,10 +173,13 @@ class AdversarialDemo(QMainWindow):
             
             # Read the processed data for display
             file_path = Path("data/raw") / f"{stock_name}.csv"
+            '''
+            file_path = Path("data/processed") / f"cleaned_data_{stock_name}.csv"
             df = pd.read_csv(file_path)
             
             # Store the data
             self.current_stock = stock_name
+            self.current_stock_file = file_path
             self.original_data = df['Close'].values
             
             # Update zoom range
@@ -204,17 +208,19 @@ class AdversarialDemo(QMainWindow):
             # Generate adversarial data
             generate_adversarial_data_cpu(
                 epsilon=self.epsilon,
-                type=attack_type
+                type=attack_type,
+                dataID=self.current_stock
             )
 
             generate_adversarial_llama_cpu(
                 epsilon=self.epsilon,
-                type=attack_type
+                type=attack_type,
+                dataID=self.current_stock
             )
             
             # Load the perturbed data
-            self.perturbed_data, _ = load_data(attacked=True, type=attack_type)
-            self.perturbed_data2, _ = load_data_llama(attacked=True, type=attack_type)
+            self.perturbed_data, _ = load_data(attacked=True, type=attack_type, dataID=self.current_stock)
+            self.perturbed_data2, _ = load_data(attacked=True, type=attack_type, dataID=self.current_stock) # we are not calling llama
             
             # Plot both original and perturbed data
             self.plot_data(show_perturbed=True)
@@ -325,11 +331,11 @@ class AdversarialDemo(QMainWindow):
         """Evaluate model performance on original and perturbed data"""
         try:
             # Evaluate on original data
-            original_labels, original_preds, _ = evaluate_model(attacked=False)
+            original_labels, original_preds, _ = evaluate_model(attacked=False, dataID=self.current_stock)
             original_accuracy = sum(1 for x, y in zip(original_labels, original_preds) if x == y) / len(original_labels)
             
             # Evaluate on perturbed data
-            perturbed_labels, perturbed_preds, _ = evaluate_model(attacked=True, type=attack_type)
+            perturbed_labels, perturbed_preds, _ = evaluate_model(attacked=True, type=attack_type, dataID=self.current_stock)
             perturbed_accuracy = sum(1 for x, y in zip(perturbed_labels, perturbed_preds) if x == y) / len(perturbed_labels)
             
             # Calculate prediction change rate

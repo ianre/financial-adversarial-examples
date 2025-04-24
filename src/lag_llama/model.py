@@ -90,7 +90,7 @@ def train_model():
     optimizer = optim.SGD(model.parameters(), lr=1.71176e-5, momentum=0.081)
     criterion = nn.BCELoss()
 
-    epochs = 10
+    epochs = 1000
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0
