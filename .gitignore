@@ -1,2 +1,7 @@
 env
 data
+envcpu
+envllama
+experiments/results/model.pth
+.vscode/launch.json
+*.pyc
